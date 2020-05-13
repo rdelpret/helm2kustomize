@@ -81,12 +81,9 @@ def helm_template(config):
     return resources
 
 def main():
-    # Pull in yaml config
     config = open_config()
-    # add repo
     os.system("helm repo add %s %s" % (config['helm']['repo'], config['helm']['url']))
     os.system("helm repo update") 
-    # pull down values file
     get_values(config)
     create_dir("base")
     resources = helm_template(config) 
