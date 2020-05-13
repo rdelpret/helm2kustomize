@@ -1,0 +1,96 @@
+#!/usr/bin/env python3
+import yaml
+import os
+import requests
+import subprocess
+import json
+def open_config():
+  if os.path.exists("./h2k.yaml"):
+      with open("h2k.yaml", 'r') as config:
+         try:
+            return yaml.safe_load(config)
+         except yaml.YAMLError as exc:
+            print(exc)
+  else:
+      return
+
+def wget(url, filename):
+    r = requests.get(url)
+    with open(filename, 'wb') as f:
+        f.write(r.content)
+
+def get_values(config):
+    if os.path.exists("./values.yaml"):
+        print("values.yaml already exists, skipping.")
+    else:
+        wget(config['helm']['values'], "values.yaml")
+        print("Pulled values.yaml from %s" % config['helm']['values'])
+
+def create_dir(rel_path):
+    path = "%s/%s" % (os.getcwd(), rel_path)
+    if os.path.isdir(path):
+        print("Directory %s already exists." % (path,))
+        return
+    try:
+        os.makedirs(path)
+    except OSError:
+        print ("Creation of the directory %s failed" % (path,))
+    else:
+         print ("Created directory %s " % path)
+
+def create_kustomize_base(name, owner, resources):
+    if os.path.exists("base/kustomization.yaml"):
+        print("kustomize.yaml already exists, skipping.")
+    kustomization = {}
+    kustomization['apiVersion'] = "kustomize.config.k8s.io/v1beta1"
+    kustomization['kind'] = "Kustomization"
+    kustomization['commonLabels'] = {"app" : name, "name" : name, "owner" : owner}
+    kustomization['resources'] = resources
+    rel_path = "base/kustomization.yaml"
+    path = "%s/%s" % (os.getcwd(), rel_path)
+    with open(path, 'w') as file:
+        kz = yaml.dump(kustomization, file, default_flow_style=False, sort_keys=False)
+        print("Created %s" % (rel_path,))
+
+def helm_template(config):
+    output = subprocess.getoutput("helm template {0} {1}/{0} -f values.yaml".format(config['helm']['name'], config['helm']['repo']))
+    output = list(filter(None, output.split("---")))
+    app = {"app" : config['kustomize']['name']}
+    resources = []
+    for i in output:
+        resource = yaml.full_load(i)
+        del resource['metadata']['labels']
+        resource['metadata']['labels'] = app 
+
+        if resource['kind'] == "Service":
+            del resource['spec']['selector']
+            resource['spec']['selector'] = app
+
+        if resource['kind'] in ['Deployment', 'StatefulSet', 'Daemonset']:
+            del resource['spec']['template']['metadata']['labels']
+            del resource['spec']['selector']['matchLabels'] 
+            resource['spec']['selector']['matchLabels'] = app 
+        yaml.Dumper.ignore_aliases = lambda *args : True
+        rel_path = "base/%s.yaml" % (resource['kind'].lower(),)
+        path = "%s/%s" % (os.getcwd(), rel_path)
+        with open(path, 'w') as file:
+            kz = yaml.dump(resource, file, default_flow_style=False, sort_keys=False)
+        print("Created %s" % (rel_path,))
+        resources.append("%s.yaml" % (resource['kind'].lower(),))
+    return resources
+
+def main():
+    # Pull in yaml config
+    config = open_config()
+    # add repo
+    os.system("helm repo add %s %s" % (config['helm']['repo'], config['helm']['url']))
+    os.system("helm repo update") 
+    # pull down values file
+    get_values(config)
+    create_dir("base")
+    resources = helm_template(config) 
+    create_kustomize_base(config['kustomize']['name'], config['kustomize']['owner'], resources)
+
+
+if __name__ == "__main__":
+    main()
