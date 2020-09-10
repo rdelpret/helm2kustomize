@@ -59,25 +59,29 @@ def helm_template(config):
     app = {"app" : config['kustomize']['name']}
     resources = []
     for i in output:
+        file_name = i.split("\n")[1].split("/")[-1]
         resource = yaml.full_load(i)
-        del resource['metadata']['labels']
-        resource['metadata']['labels'] = app 
+        name = resource['metadata']['name'] + "-" + file_name
+        try:
+            del resource['metadata']['labels']
+            resource['metadata']['labels'] = app 
+            if resource['kind'] == "Service":
+                del resource['spec']['selector']
+                resource['spec']['selector'] = app
 
-        if resource['kind'] == "Service":
-            del resource['spec']['selector']
-            resource['spec']['selector'] = app
-
-        if resource['kind'] in ['Deployment', 'StatefulSet', 'Daemonset']:
-            del resource['spec']['template']['metadata']['labels']
-            del resource['spec']['selector']['matchLabels'] 
-            resource['spec']['selector']['matchLabels'] = app 
+            if resource['kind'] in ['Deployment', 'StatefulSet', 'Daemonset']:
+                del resource['spec']['template']['metadata']['labels']
+                del resource['spec']['selector']['matchLabels'] 
+                resource['spec']['selector']['matchLabels'] = app 
+        except:
+            pass
         yaml.Dumper.ignore_aliases = lambda *args : True
-        rel_path = "base/%s.yaml" % (resource['kind'].lower(),)
+        rel_path = "base/%s" % (name,)
         path = "%s/%s" % (os.getcwd(), rel_path)
         with open(path, 'w') as file:
             kz = yaml.dump(resource, file, default_flow_style=False, sort_keys=False)
         print("Created %s" % (rel_path,))
-        resources.append("%s.yaml" % (resource['kind'].lower(),))
+        resources.append("%s.yaml" % (name.lower(),))
     return resources
 
 def main():
